@@ -106,7 +106,7 @@ def get_opt():
     parser.add_argument(
         "--upsample", type=str, default="bilinear", choices=["nearest", "bilinear"]
     )
-    parser.add_argument("--occlusion", action="store_true", help="Occlusion handling")
+    parser.add_argument("--occlusion", action="store_false", help="Occlusion handling")
 
     # generator
     parser.add_argument(
@@ -162,10 +162,48 @@ def load_checkpoint_G(model, checkpoint_path, opt):
     if opt.cuda:
         model.cuda()
 
+def load_model_wrap():
+    opt = get_opt()
+    print(opt)
+    print("Start to test %s!")
+    os.environ["CUDA_VISIBLE_DEVICES"] = opt.gpu_ids
+
+    # create test dataset & loader
+    test_dataset = CPDatasetTest(opt)
+    test_loader = CPDataLoader(opt, test_dataset)
+
+    # visualization
+    # if not os.path.exists(opt.tensorboard_dir):
+    #     os.makedirs(opt.tensorboard_dir)
+    # board = SummaryWriter(log_dir=os.path.join(opt.tensorboard_dir, opt.test_name, opt.datamode, opt.datasetting))
+
+    ## Model
+    # tocg
+    input1_nc = 4  # cloth + cloth-mask
+    input2_nc = opt.semantic_nc + 3  # parse_agnostic + densepose
+    tocg = ConditionGenerator(
+        opt,
+        input1_nc=input1_nc,
+        input2_nc=input2_nc,
+        output_nc=opt.output_nc,
+        ngf=96,
+        norm_layer=nn.BatchNorm2d,
+    )
+
+    # generator
+    opt.semantic_nc = 7
+    generator = SPADEGenerator(opt, 3 + 3 + 3)
+    generator.print_network()
+
+    # Load Checkpoint
+    load_checkpoint(tocg, opt.tocg_checkpoint, opt)
+    load_checkpoint_G(generator, opt.gen_checkpoint, opt)
+
+    # Train
+    test(opt, test_loader, tocg, generator)
+
 
 def test(opt, test_loader, tocg, generator):
-
-    print(opt)
 
     gauss = tgm.image.GaussianBlur((15, 15), (3, 3))
     if opt.cuda:
@@ -399,63 +437,17 @@ def process_image(image, cloth_image):
     ) as f:
         f.write(f"{image_fname} {cloth_fname}")
 
-    # create test dataset & loader
-    test_dataset = CPDatasetTest(opt)
-    test_loader = CPDataLoader(opt, test_dataset)
-
-    test(opt, test_loader, tocg, generator)
-    # gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    output_image = Image.open("H:\\Virtual_Try_on_HR_Viton\\output\\00135_00_08532_00.png")
+    load_model_wrap()
+    out_fname = image_fname.replace(".jpg", '') + "_" + cloth_fname.replace(".jpg", '') + '.png'
+    output_image = Image.open(f"H:\\Virtual_Try_on_HR_Viton\\output\\{out_fname}")
     return output_image
-
-
-
-# def main():
-opt = get_opt()
-print(opt)
-print("Start to test %s!")
-os.environ["CUDA_VISIBLE_DEVICES"] = opt.gpu_ids
-
-# # create test dataset & loader
-# test_dataset = CPDatasetTest(opt)
-# test_loader = CPDataLoader(opt, test_dataset)
-
-# visualization
-# if not os.path.exists(opt.tensorboard_dir):
-#     os.makedirs(opt.tensorboard_dir)
-# board = SummaryWriter(log_dir=os.path.join(opt.tensorboard_dir, opt.test_name, opt.datamode, opt.datasetting))
-
-## Model
-# tocg
-input1_nc = 4  # cloth + cloth-mask
-input2_nc = opt.semantic_nc + 3  # parse_agnostic + densepose
-tocg = ConditionGenerator(
-    opt,
-    input1_nc=input1_nc,
-    input2_nc=input2_nc,
-    output_nc=opt.output_nc,
-    ngf=96,
-    norm_layer=nn.BatchNorm2d,
-)
-
-# generator
-opt.semantic_nc = 7
-generator = SPADEGenerator(opt, 3 + 3 + 3)
-generator.print_network()
-
-# Load Checkpoint
-load_checkpoint(tocg, opt.tocg_checkpoint, opt)
-load_checkpoint_G(generator, opt.gen_checkpoint, opt)
-
-# Train
-# test(opt, test_loader, tocg, generator)
 
 
 with gr.Blocks() as demo:
     with gr.Row():
-        im = gr.Image(type="filepath")
-        example_image = gr.Image(type="filepath")
-        im_2 = gr.Image()
+        im = gr.Image(type="filepath", label="Person")
+        example_image = gr.Image(type="filepath", label="Apparel")
+        im_2 = gr.Image(label="Try-on")
 
     btn = gr.Button(value="Try-on")
     btn.click(process_image, inputs=[im, example_image], outputs=[im_2])
@@ -493,5 +485,4 @@ with gr.Blocks() as demo:
     )
 
 if __name__ == "__main__":
-    # main()
-    demo.launch(show_api=False)
+    demo.launch(show_api=False, share=False,server_name="0.0.0.0")
