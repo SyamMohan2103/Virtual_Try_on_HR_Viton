@@ -8,6 +8,7 @@ data/
 output/
 *.zip
 eval_models/
+.vscode/
 
 # C extensions
 *.so
